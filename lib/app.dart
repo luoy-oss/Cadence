@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/constants/app_colors.dart';
-import 'screens/calibration_screen.dart';
 import 'screens/game_overlay_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/result_screen.dart';
@@ -39,7 +38,6 @@ class CadenceApp extends StatelessWidget {
       initialRoute: '/',
       routes: {
         '/': (context) => const HomeScreen(),
-        '/calibration': (context) => const CalibrationScreen(),
         '/game': (context) => const GameOverlayScreen(),
         '/result': (context) => const ResultScreen(),
       },

@@ -9,6 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import '../core/constants/app_colors.dart';
 import '../core/constants/app_strings.dart';
 import '../providers/score_provider.dart';
+import '../providers/settings_provider.dart';
 import '../services/overlay_service.dart';
 import '../widgets/score_card.dart';
 import '../widgets/glass_container.dart';
@@ -23,6 +24,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObserver {
   bool _hasOverlay = false;
   bool _isOverlayRunning = false;
+  bool _callbacksSet = false;
 
   @override
   void initState() {
@@ -52,6 +54,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
         _hasOverlay = overlay;
         _isOverlayRunning = running;
       });
+      if (running && !_callbacksSet) {
+        _setupFloatingCallbacks();
+      }
+    }
+  }
+
+  void _setupFloatingCallbacks() {
+    OverlayService.setCallbacks(
+      onPlay: () {
+        // 悬浮窗点击播放 - 跳转游戏页面
+        final selected = ref.read(scoreListProvider).selectedScore;
+        if (selected != null && mounted) {
+          Navigator.pushNamed(context, '/game');
+        }
+      },
+      onPause: () {},
+      onStop: () {},
+      onCalibrationChanged: (baseX, baseY, colSpacing, rowSpacing) {
+        ref.read(settingsProvider.notifier).updateConfig(
+          ref.read(settingsProvider).copyWith(
+            baseX: baseX, baseY: baseY,
+            columnSpacing: colSpacing, rowSpacing: rowSpacing,
+          ),
+        );
+      },
+      onPanelOpened: () {
+        // 面板打开时同步数据到悬浮窗
+        _syncDataToFloating();
+      },
+    );
+    _callbacksSet = true;
+    _syncDataToFloating();
+  }
+
+  void _syncDataToFloating() {
+    final scores = ref.read(scoreListProvider).scores;
+    OverlayService.sendScoreList(
+      scores.map((s) => {'id': s.id, 'name': s.name}).toList(),
+    );
+    final selectedScore = ref.read(scoreListProvider).selectedScore;
+    if (selectedScore != null) {
+      OverlayService.updateSelectedScore(selectedScore.name);
+    }
+    final config = ref.read(settingsProvider);
+    if (config.baseX != 0 || config.baseY != 0) {
+      OverlayService.sendKeyConfig(config.toJson());
     }
   }
 
@@ -59,6 +107,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
   Widget build(BuildContext context) {
     final scoreState = ref.watch(scoreListProvider);
     final filteredScores = ref.watch(filteredScoresProvider);
+
+    // 监听乐谱变化，同步到悬浮窗
+    ref.listen(scoreListProvider, (prev, next) {
+      if (_isOverlayRunning) {
+        OverlayService.sendScoreList(
+          next.scores.map((s) => {'id': s.id, 'name': s.name}).toList(),
+        );
+        if (next.selectedScore != null) {
+          OverlayService.updateSelectedScore(next.selectedScore!.name);
+        }
+      }
+    });
 
     return Scaffold(
       body: Container(
@@ -79,8 +139,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                     SliverToBoxAdapter(child: _buildOverlayToggleCard()),
                     if (!_hasOverlay)
                       SliverToBoxAdapter(child: _buildPermissionBanner()),
-                    if (_isOverlayRunning && scoreState.selectedScore != null)
-                      SliverToBoxAdapter(child: _buildPlayButton()),
+                    if (_isOverlayRunning)
+                      SliverToBoxAdapter(child: _buildInfoCard()),
                     SliverToBoxAdapter(child: _buildSearchBar()),
                     const SliverToBoxAdapter(
                       child: Padding(
@@ -114,6 +174,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                                 isSelected: isSelected,
                                 onTap: () {
                                   ref.read(scoreListProvider.notifier).selectScore(score.id);
+                                  if (_isOverlayRunning) {
+                                    OverlayService.updateSelectedScore(score.name);
+                                  }
                                 },
                                 onDelete: () => _confirmDelete(score.id, score.name),
                               ),
@@ -178,11 +241,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
               onPressed: _showPermissionDialog,
               tooltip: '权限不足',
             ),
-          IconButton(
-            icon: const Icon(Icons.tune_rounded, color: AppColors.textTertiary),
-            onPressed: () => Navigator.pushNamed(context, '/calibration'),
-            tooltip: '按键校准',
-          ),
         ],
       ),
     );
@@ -243,11 +301,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
               onChanged: canToggle
                   ? (value) async {
                       if (value) {
-                        await OverlayService.start();
+                        final started = await OverlayService.start();
+                        if (started) {
+                          await Future.delayed(const Duration(milliseconds: 500));
+                          await _checkPermissions();
+                          if (_isOverlayRunning) _setupFloatingCallbacks();
+                        }
                       } else {
                         await OverlayService.stop();
+                        setState(() {
+                          _isOverlayRunning = false;
+                          _callbacksSet = false;
+                        });
                       }
-                      await _checkPermissions();
                     }
                   : null,
             ),
@@ -295,49 +361,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     );
   }
 
-  Widget _buildPlayButton() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: AppColors.gradientPrimary,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.primary.withOpacity(0.4),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
+  Widget _buildInfoCard() {
+    return GlassContainer(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.info_outline_rounded, color: AppColors.primary, size: 18),
           ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _startGame,
-              borderRadius: BorderRadius.circular(14),
-              child: const Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.play_arrow_rounded, color: Colors.white, size: 24),
-                    SizedBox(width: 8),
-                    Text(
-                      AppStrings.startGame,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              '悬浮窗已开启，点击悬浮球打开控制面板',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -415,12 +461,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
         child: const Icon(Icons.add_rounded, color: Colors.white, size: 28),
       ),
     );
-  }
-
-  void _startGame() {
-    final selected = ref.read(scoreListProvider).selectedScore;
-    if (selected == null) return;
-    Navigator.pushNamed(context, '/game');
   }
 
   Future<void> _importScore() async {
