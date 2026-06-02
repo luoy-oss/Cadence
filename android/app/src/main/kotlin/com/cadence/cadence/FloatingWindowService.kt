@@ -67,6 +67,10 @@ class FloatingWindowService : Service() {
     private var colSpacing = 150f
     private var rowSpacing = 120f
 
+    // 显示参数
+    private var circleSize = 36f   // 目标圆半径
+    private var numberSize = 22f   // 编号字号
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -251,6 +255,39 @@ class FloatingWindowService : Service() {
         contentLayout.addView(speedBar)
         contentLayout.addView(createDivider())
 
+        // 圆圈大小
+        val circleLabel = TextView(this).apply {
+            text = "圆圈大小: ${circleSize.toInt()}"; setTextColor(Color.WHITE); textSize = 13f
+        }
+        contentLayout.addView(circleLabel)
+        contentLayout.addView(SeekBar(this).apply {
+            max = 60; progress = (circleSize - 20).toInt()
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { circleSize = (20 + p).toFloat(); circleLabel.text = "圆圈大小: ${circleSize.toInt()}" }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dpToPx(4); bottomMargin = dpToPx(4)
+        })
+
+        // 编号字号
+        val fontLabel = TextView(this).apply {
+            text = "编号字号: ${numberSize.toInt()}"; setTextColor(Color.WHITE); textSize = 13f
+        }
+        contentLayout.addView(fontLabel)
+        contentLayout.addView(SeekBar(this).apply {
+            max = 22; progress = (numberSize - 14).toInt()
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { numberSize = (14 + p).toFloat(); fontLabel.text = "编号字号: ${numberSize.toInt()}" }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dpToPx(4); bottomMargin = dpToPx(4)
+        })
+        contentLayout.addView(createDivider())
+
         // 播放控制按钮
         val controlRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
@@ -406,6 +443,7 @@ class FloatingWindowService : Service() {
 
             gameOverlay = GameOverlayView(this, baseX, baseY, colSpacing, rowSpacing).apply {
                 setSpeed(gameSpeed)
+                setDisplayParams(circleSize, circleSize * 2.5f, numberSize)
                 setGameData(events, durationMs)
                 onGameEnd = {
                     val handler2 = android.os.Handler(mainLooper)

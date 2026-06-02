@@ -21,8 +21,15 @@ class GameOverlayView(
 
     companion object {
         private const val APPROACH_TIME_MS = 1200L
-        private const val TARGET_RADIUS = 36f
-        private const val START_RADIUS = 90f
+    }
+
+    // 可调参数（有默认值）
+    private var targetRadius = 36f
+    private var startRadius = 90f
+    private var numberTextSize = 22f
+
+    fun setDisplayParams(targetR: Float, startR: Float, numSize: Float) {
+        targetRadius = targetR; startRadius = startR; numberTextSize = numSize
     }
 
     data class NoteEvent(
@@ -197,7 +204,7 @@ class GameOverlayView(
             if (t > APPROACH_TIME_MS || t < -200) continue
 
             val progress = (1.0 - t.toDouble() / APPROACH_TIME_MS).coerceIn(0.0, 1.0).toFloat()
-            val curRadius = START_RADIUS + (TARGET_RADIUS - START_RADIUS) * progress
+            val curRadius = startRadius + (targetRadius - startRadius) * progress
             val color = getNoteColor(event.sequenceIndex)
 
             // 外圈 approach circle
@@ -209,13 +216,13 @@ class GameOverlayView(
             // 目标圆填充
             val a2 = (60 + progress * 120).toInt().coerceIn(0, 255)
             targetFillPaint.color = Color.argb(a2, Color.red(color), Color.green(color), Color.blue(color))
-            canvas.drawCircle(cx, cy, TARGET_RADIUS, targetFillPaint)
+            canvas.drawCircle(cx, cy, targetRadius, targetFillPaint)
 
             // 目标圆边框
             val a3 = (130 + progress * 125).toInt().coerceIn(0, 255)
             targetBorderPaint.color = Color.argb(a3, Color.red(color), Color.green(color), Color.blue(color))
             targetBorderPaint.strokeWidth = 2.5f
-            canvas.drawCircle(cx, cy, TARGET_RADIUS, targetBorderPaint)
+            canvas.drawCircle(cx, cy, targetRadius, targetBorderPaint)
 
             // 中心白点
             dotPaint.color = Color.WHITE
@@ -225,18 +232,14 @@ class GameOverlayView(
             if (progress > 0.85f) {
                 val ga = ((progress - 0.85f) / 0.15f * 140).toInt().coerceIn(0, 255)
                 glowPaint.color = Color.argb(ga, Color.red(color), Color.green(color), Color.blue(color))
-                canvas.drawCircle(cx, cy, TARGET_RADIUS + 3, glowPaint)
+                canvas.drawCircle(cx, cy, targetRadius + 3, glowPaint)
             }
 
             // 圆圈内编号（大号加粗白色）
             numberPaint.color = Color.WHITE
-            numberPaint.textSize = 22f + progress * 4f
+            numberPaint.textSize = numberTextSize + progress * 4f
             numberPaint.setShadowLayer(6f, 0f, 0f, Color.argb(180, 0, 0, 0))
             canvas.drawText("${event.sequenceIndex}", cx, cy + 8f, numberPaint)
-
-            // 圆圈下方音符名
-            namePaint.color = Color.argb((progress * 220).toInt().coerceIn(0, 255), 255, 255, 255)
-            canvas.drawText(noteNames[event.row][event.col], cx, cy + TARGET_RADIUS + 16f, namePaint)
         }
     }
 
@@ -255,17 +258,17 @@ class GameOverlayView(
             val e = it.next(); val age = (now - e.startTime).toFloat() / 600f
             if (age >= 1f) { it.remove(); continue }
             val op = ((1f - age) * 255).toInt().coerceIn(0, 255)
-            val r = TARGET_RADIUS + age * 50
+            val r = targetRadius + age * 50
             hitEffectPaint.color = Color.argb(op, Color.red(e.color), Color.green(e.color), Color.blue(e.color))
             hitEffectPaint.strokeWidth = 4f * (1f - age * 0.5f)
             canvas.drawCircle(e.x, e.y, r, hitEffectPaint)
             val inner = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.argb(((1f - age) * 100).toInt().coerceIn(0, 255), Color.red(e.color), Color.green(e.color), Color.blue(e.color)) }
-            canvas.drawCircle(e.x, e.y, TARGET_RADIUS * (1f - age * 0.5f), inner)
+            canvas.drawCircle(e.x, e.y, targetRadius * (1f - age * 0.5f), inner)
             if (age < 0.5f) {
                 val ta = if (age < 0.2f) 255 else ((0.5f - age) / 0.3f * 255).toInt().coerceIn(0, 255)
                 hitTextPaint.color = Color.argb(ta, Color.red(e.color), Color.green(e.color), Color.blue(e.color))
                 hitTextPaint.textSize = 20f + age * 6f
-                canvas.drawText(e.label, e.x, e.y - TARGET_RADIUS - 30f - age * 20f, hitTextPaint)
+                canvas.drawText(e.label, e.x, e.y - targetRadius - 30f - age * 20f, hitTextPaint)
             }
         }
     }

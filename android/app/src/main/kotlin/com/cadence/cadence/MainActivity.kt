@@ -51,11 +51,14 @@ class MainActivity : FlutterActivity() {
                 "sendKeyConfig" -> {
                     val config = call.arguments as? Map<String, Any>
                     if (config != null) {
+                        // 注意：Dart KeyPositionConfig.toJson() 用的是 columnSpacing/rowSpacing
+                        val cs = (config["columnSpacing"] as? Number)?.toFloat()
+                            ?: (config["colSpacing"] as? Number)?.toFloat() ?: 150f
+                        val rs = (config["rowSpacing"] as? Number)?.toFloat() ?: 120f
                         FloatingWindowService.instance?.updateConfig(
                             (config["baseX"] as? Number)?.toFloat() ?: 0f,
                             (config["baseY"] as? Number)?.toFloat() ?: 0f,
-                            (config["colSpacing"] as? Number)?.toFloat() ?: 150f,
-                            (config["rowSpacing"] as? Number)?.toFloat() ?: 120f,
+                            cs, rs,
                         )
                     }
                     result.success(null)
