@@ -261,10 +261,11 @@ class GameOverlayView(
             for (note in group.notes) {
                 val cx = sx(baseX + note.col * colSpacing)
                 val cy = sy(baseY + note.row * rowSpacing)
+                val r = Color.red(color); val g = Color.green(color); val b = Color.blue(color)
 
                 // O→o 缩圈
                 val alpha = (progress * progress * 230).toInt().coerceIn(0, 255)
-                approachPaint.color = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
+                approachPaint.color = Color.argb(alpha, r, g, b)
                 approachPaint.strokeWidth = 3f + progress * 3f
                 canvas.drawCircle(cx, cy, curRadius, approachPaint)
 
@@ -274,14 +275,14 @@ class GameOverlayView(
                     val glowP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                         style = Paint.Style.STROKE; strokeWidth = 5f
                         maskFilter = BlurMaskFilter(10f, BlurMaskFilter.Blur.NORMAL)
-                        color = Color.argb(ga, Color.red(color), Color.green(color), Color.blue(color))
+                        this.color = Color.argb(ga, r, g, b)
                     }
                     canvas.drawCircle(cx, cy, targetRadius * 0.7f + 4, glowP)
                 }
 
                 // 编号（圆圈上方，rank 1/2/3）
                 val numAlpha = (progress * 200).toInt().coerceIn(0, 255)
-                numberPaint.color = Color.argb(numAlpha, Color.red(color), Color.green(color), Color.blue(color))
+                numberPaint.color = Color.argb(numAlpha, r, g, b)
                 numberPaint.textSize = numberTextSize + progress * 4f
                 numberPaint.setShadowLayer(6f, 0f, 0f, Color.argb(180, 0, 0, 0))
                 canvas.drawText("$rank", cx, cy + numberTextSize * 0.35f, numberPaint)
