@@ -303,9 +303,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                       if (value) {
                         final started = await OverlayService.start();
                         if (started) {
-                          await Future.delayed(const Duration(milliseconds: 500));
-                          await _checkPermissions();
-                          if (_isOverlayRunning) _setupFloatingCallbacks();
+                          // start() 返回 true 说明 Service 已启动，直接更新状态
+                          setState(() => _isOverlayRunning = true);
+                          _setupFloatingCallbacks();
                         }
                       } else {
                         await OverlayService.stop();
