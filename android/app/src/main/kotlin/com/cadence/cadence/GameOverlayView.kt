@@ -5,10 +5,14 @@ import android.content.Context
 import android.graphics.*
 import android.os.SystemClock
 import android.view.View
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
- * 游戏覆盖层 - osu! 风格
- * 图层顺序：后按的先画（底层），先按的后画（顶层）
+ * 游戏覆盖层 - 落下式音游风格
+ * Row 0: 从上方下落
+ * Row 1: 从两侧进入
+ * Row 2: 从下方上浮
  */
 @SuppressLint("ViewConstructor")
 class GameOverlayView(
@@ -37,13 +41,8 @@ class GameOverlayView(
     private var isPlaying = false
     private var totalDurationMs = 0L
 
-    // 命中效果（爆炸 + 判定文字）
-    data class HitBurst(
-        val x: Float, val y: Float,
-        val startTime: Long,
-        val color: Int,
-        val grade: String
-    )
+    // 命中效果
+    data class HitBurst(val x: Float, val y: Float, val startTime: Long, val color: Int)
     private val hitBursts = mutableListOf<HitBurst>()
 
     var onGameEnd: (() -> Unit)? = null
@@ -51,30 +50,33 @@ class GameOverlayView(
     private fun sx(screenX: Float) = screenX - screenOffset[0]
     private fun sy(screenY: Float) = screenY - screenOffset[1]
 
-    // ===== 颜色 =====
-    private val noteColors = intArrayOf(
-        Color.parseColor("#FF6B6B"), Color.parseColor("#FF8E53"),
-        Color.parseColor("#FFD93D"), Color.parseColor("#6BCB77"),
-        Color.parseColor("#4D96FF"), Color.parseColor("#9B59B6"),
-    )
-    private fun getNoteColor(seq: Int) = noteColors[seq % noteColors.size]
+    // 简洁配色：单色（白色/浅蓝），不干扰判断
+    private val noteColor = Color.parseColor("#E0E8FF")       // 淡蓝白
+    private val noteColorBright = Color.parseColor("#FFFFFF")  // 纯白
+    private val hitZoneColor = Color.parseColor("#6366F1")     // 紫蓝（命中区）
+    private val hitZoneGlow = Color.parseColor("#818CF8")      // 亮紫蓝
+    private val trailColor = Color.parseColor("#40E0E8FF")     // 半透明白
 
-    // ===== 画笔 =====
-    private val approachPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 4f
+    // 画笔
+    private val notePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val noteBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 2f; color = noteColorBright
     }
-    private val targetFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val targetBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 3f
+    private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val hitZonePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 3f; color = hitZoneColor
     }
-    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 6f
-        maskFilter = BlurMaskFilter(12f, BlurMaskFilter.Blur.NORMAL)
+    private val hitZoneFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL; color = Color.argb(30, 99, 102, 241)
+    }
+    private val hitZoneGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 5f
+        maskFilter = BlurMaskFilter(10f, BlurMaskFilter.Blur.NORMAL)
     }
     private val numberPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE; textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT_BOLD
-        setShadowLayer(8f, 0f, 0f, Color.argb(200, 0, 0, 0))
+        setShadowLayer(6f, 0f, 0f, Color.argb(200, 0, 0, 0))
     }
     private val comboTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#FFD700"); textSize = 56f; textAlign = Paint.Align.CENTER
@@ -88,15 +90,13 @@ class GameOverlayView(
         color = Color.argb(60, 255, 255, 255)
     }
     private val progressFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val burstRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 4f; strokeCap = Paint.Cap.ROUND
+    private val burstPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 3f
     }
     private val burstFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val gradeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = 20f; textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT_BOLD
-    }
     private val chordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 3f; strokeCap = Paint.Cap.ROUND
+        style = Paint.Style.STROKE; strokeWidth = 2f; strokeCap = Paint.Cap.ROUND
+        pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
     }
 
     fun setSpeed(speed: Float) { gameSpeed = speed.coerceIn(0.1f, 10.0f) }
@@ -109,9 +109,10 @@ class GameOverlayView(
         val grouped = events.groupBy { it.targetTimeMs }.toSortedMap()
             .map { (t, n) -> TimeGroup(t, n) }
         timeGroups = grouped
+        // 序号循环 0-9
         var seq = 0; val mutable = events.toMutableList(); var lastT = -1L
         for (g in grouped) {
-            if (g.timeMs != lastT) { seq++; lastT = g.timeMs }
+            if (g.timeMs != lastT) { seq = (seq + 1) % 10; lastT = g.timeMs }
             for (n in g.notes) {
                 val idx = mutable.indexOfFirst { it.row == n.row && it.col == n.col && it.targetTimeMs == n.targetTimeMs }
                 if (idx >= 0) mutable[idx] = n.copy(sequenceIndex = seq)
@@ -136,167 +137,167 @@ class GameOverlayView(
             isPlaying = false; onGameEnd?.invoke(); return
         }
 
+        // 先画命中区
+        drawHitZones(canvas, gameTimeMs)
+        // 和弦连线
         drawChordCurves(canvas, gameTimeMs)
-
-        // 图层顺序：后按的先画（底层），先按的后画（顶层）
-        // 所以按 sequenceIndex 降序绘制
+        // 音符（后按的先画）
         val sortedNotes = noteEvents.filter { e ->
             val t = e.targetTimeMs - gameTimeMs
-            t <= APPROACH_TIME_MS && t >= -300
+            t <= APPROACH_TIME_MS + 200 && t >= -300
         }.sortedByDescending { it.sequenceIndex }
 
         for (event in sortedNotes) {
-            drawSingleNote(canvas, event, gameTimeMs)
+            drawNote(canvas, event, gameTimeMs)
         }
-
+        // 到达命中区时触发的命中效果
         drawHitBursts(canvas, now)
         drawCombo(canvas)
         drawProgressBar(canvas, gameTimeMs)
         postInvalidateDelayed(16)
     }
 
-    /** 绘制单个音符（osu! 风格）*/
-    private fun drawSingleNote(canvas: Canvas, event: NoteEvent, gameTimeMs: Long) {
-        val cx = sx(baseX + event.col * colSpacing)
-        val cy = sy(baseY + event.row * rowSpacing)
+    /** 命中区（固定的半透明圆环 + 编号）*/
+    private fun drawHitZones(canvas: Canvas, gameTimeMs: Long) {
+        for (event in noteEvents) {
+            val cx = sx(baseX + event.col * colSpacing)
+            val cy = sy(baseY + event.row * rowSpacing)
+            val t = event.targetTimeMs - gameTimeMs
+            // 只画在窗口内的命中区
+            if (t > APPROACH_TIME_MS + 200 || t < -300) continue
+
+            // 命中区填充
+            canvas.drawCircle(cx, cy, targetRadius, hitZoneFillPaint)
+            // 命中区边框
+            canvas.drawCircle(cx, cy, targetRadius, hitZonePaint)
+            // 编号（小字，命中区内）
+            numberPaint.color = Color.argb(120, 255, 255, 255)
+            numberPaint.textSize = numberTextSize * 0.6f
+            canvas.drawText("${event.sequenceIndex}", cx, cy + numberTextSize * 0.2f, numberPaint)
+        }
+    }
+
+    /** 绘制单个音符（从远处飞向命中区）*/
+    private fun drawNote(canvas: Canvas, event: NoteEvent, gameTimeMs: Long) {
+        val hitX = sx(baseX + event.col * colSpacing)
+        val hitY = sy(baseY + event.row * rowSpacing)
         val t = event.targetTimeMs - gameTimeMs
         val progress = (1.0 - t.toDouble() / APPROACH_TIME_MS).coerceIn(0.0, 1.0).toFloat()
-        val color = getNoteColor(event.sequenceIndex)
 
-        // 当 approach circle 与 target circle 重合时（progress ≈ 1.0），该按了
-        val curRadius = startRadius + (targetRadius - startRadius) * progress
+        // 根据行决定飞入方向
+        val travelDist = startRadius * 3f
+        val noteX: Float
+        val noteY: Float
 
-        // ===== 1. 目标圆（固定大小，随进度变亮）=====
-        val fillAlpha = (80 + progress * 150).toInt().coerceIn(0, 255)
-        targetFillPaint.color = Color.argb(fillAlpha, Color.red(color), Color.green(color), Color.blue(color))
-        canvas.drawCircle(cx, cy, targetRadius, targetFillPaint)
-
-        val borderAlpha = (150 + progress * 105).toInt().coerceIn(0, 255)
-        targetBorderPaint.color = Color.argb(borderAlpha, Color.red(color), Color.green(color), Color.blue(color))
-        canvas.drawCircle(cx, cy, targetRadius, targetBorderPaint)
-
-        // ===== 2. Approach circle（从大到小，从透明到不透明）=====
-        val approachAlpha = (progress * progress * 255).toInt().coerceIn(0, 255)  // 二次方曲线，后期更亮
-        approachPaint.color = Color.argb(approachAlpha, Color.red(color), Color.green(color), Color.blue(color))
-        approachPaint.strokeWidth = 4f + progress * 2f  // 越接近越粗
-        canvas.drawCircle(cx, cy, curRadius, approachPaint)
-
-        // ===== 3. 发光效果（接近时）=====
-        if (progress > 0.8f) {
-            val ga = ((progress - 0.8f) / 0.2f * 160).toInt().coerceIn(0, 255)
-            glowPaint.color = Color.argb(ga, Color.red(color), Color.green(color), Color.blue(color))
-            canvas.drawCircle(cx, cy, targetRadius + 4, glowPaint)
+        when (event.row) {
+            0 -> {
+                // Row 0: 从上方下落
+                noteX = hitX
+                noteY = hitY - travelDist + travelDist * progress
+            }
+            2 -> {
+                // Row 2: 从下方上浮
+                noteX = hitX
+                noteY = hitY + travelDist - travelDist * progress
+            }
+            else -> {
+                // Row 1: 从两侧进入（奇数列从左，偶数列从右）
+                val fromLeft = event.col % 2 == 0
+                noteX = if (fromLeft) hitX - travelDist + travelDist * progress
+                        else hitX + travelDist - travelDist * progress
+                noteY = hitY
+            }
         }
 
-        // ===== 4. 圆圈内编号（大号加粗）=====
+        // 拖尾效果
+        drawTrail(canvas, noteX, noteY, hitX, hitY, progress, event.row)
+
+        // 音符圆圈
+        val noteSize = targetRadius * 0.8f
+        val alpha = (200 + progress * 55).toInt().coerceIn(0, 255)
+        notePaint.color = Color.argb(alpha, Color.red(noteColor), Color.green(noteColor), Color.blue(noteColor))
+        canvas.drawCircle(noteX, noteY, noteSize, notePaint)
+        noteBorderPaint.color = Color.argb(alpha, Color.red(noteColorBright), Color.green(noteColorBright), Color.blue(noteColorBright))
+        canvas.drawCircle(noteX, noteY, noteSize, noteBorderPaint)
+
+        // 音符内编号
         numberPaint.color = Color.WHITE
-        numberPaint.textSize = numberTextSize + progress * 6f
-        numberPaint.setShadowLayer(8f, 0f, 0f, Color.argb(200, 0, 0, 0))
-        canvas.drawText("${event.sequenceIndex}", cx, cy + numberTextSize * 0.35f, numberPaint)
+        numberPaint.textSize = numberTextSize
+        numberPaint.setShadowLayer(6f, 0f, 0f, Color.argb(200, 0, 0, 0))
+        canvas.drawText("${event.sequenceIndex}", noteX, noteY + numberTextSize * 0.35f, numberPaint)
 
-        // ===== 5. 自动命中判定（时间过了就触发爆炸）=====
-        if (t < -50 && t > -300) {
-            // 这个音符已经过了命中时间，触发爆炸效果
-            triggerHitBurst(cx, cy, color, t)
+        // 接近命中区时发光
+        if (progress > 0.85f) {
+            val ga = ((progress - 0.85f) / 0.15f * 150).toInt().coerceIn(0, 255)
+            hitZoneGlowPaint.color = Color.argb(ga, Color.red(hitZoneGlow), Color.green(hitZoneGlow), Color.blue(hitZoneGlow))
+            canvas.drawCircle(hitX, hitY, targetRadius + 4, hitZoneGlowPaint)
+        }
+
+        // 到达命中区时触发爆炸
+        if (t in -80..0) {
+            hitBursts.add(HitBurst(hitX, hitY, SystemClock.elapsedRealtime(), hitZoneGlow))
         }
     }
 
-    /** 触发命中爆炸（每个音符只触发一次）*/
-    private var lastBurstIndex = -1
-    private fun triggerHitBurst(cx: Float, cy: Float, color: Int, timeDiff: Long) {
-        // 简化：根据时间差判定等级
-        val absDiff = kotlin.math.abs(timeDiff)
-        val grade = when {
-            absDiff <= 50 -> "PERFECT"
-            absDiff <= 100 -> "GREAT"
-            absDiff <= 150 -> "GOOD"
-            else -> "MISS"
-        }
-        val gradeColor = when (grade) {
-            "PERFECT" -> Color.parseColor("#FFD700")
-            "GREAT" -> Color.parseColor("#22C55E")
-            "GOOD" -> Color.parseColor("#3B82F6")
-            else -> Color.parseColor("#EF4444")
-        }
-        // 避免重复触发（通过时间戳去重）
-        val burstKey = "${cx.toInt()}_${cy.toInt()}_${(timeDiff / 100)}"
-        if (hitBursts.none { it.startTime == SystemClock.elapsedRealtime() && it.x == cx && it.y == cy }) {
-            hitBursts.add(HitBurst(cx, cy, SystemClock.elapsedRealtime(), gradeColor, grade))
+    /** 拖尾效果 */
+    private fun drawTrail(canvas: Canvas, nx: Float, ny: Float, hx: Float, hy: Float, progress: Float, row: Int) {
+        val trailLen = (1f - progress) * 0.6f  // 越远拖尾越长
+        val segments = 5
+        for (i in 1..segments) {
+            val frac = i.toFloat() / segments
+            val tx = nx + (hx - nx) * frac * trailLen
+            val ty = ny + (hy - ny) * frac * trailLen
+            val ta = ((1f - frac) * 60 * progress).toInt().coerceIn(0, 255)
+            trailPaint.color = Color.argb(ta, Color.red(trailColor), Color.green(trailColor), Color.blue(trailColor))
+            val tSize = targetRadius * 0.4f * (1f - frac * 0.5f)
+            canvas.drawCircle(tx, ty, tSize, trailPaint)
         }
     }
 
-    /** 绘制命中爆炸效果（osu! 风格）*/
+    /** 命中爆炸效果 */
     private fun drawHitBursts(canvas: Canvas, now: Long) {
         val it = hitBursts.iterator()
         while (it.hasNext()) {
             val b = it.next()
-            val age = (now - b.startTime).toFloat() / 600f
+            val age = (now - b.startTime).toFloat() / 500f
             if (age >= 1f) { it.remove(); continue }
 
             val opacity = (1f - age)
 
-            // 外圈扩散环
-            val ringRadius = targetRadius + age * 60
-            val ringAlpha = (opacity * 200).toInt().coerceIn(0, 255)
-            burstRingPaint.color = Color.argb(ringAlpha, Color.red(b.color), Color.green(b.color), Color.blue(b.color))
-            burstRingPaint.strokeWidth = 4f * (1f - age * 0.6f)
-            canvas.drawCircle(b.x, b.y, ringRadius, burstRingPaint)
+            // 扩散环
+            val ringR = targetRadius + age * 50
+            val ringA = (opacity * 200).toInt().coerceIn(0, 255)
+            burstPaint.color = Color.argb(ringA, Color.red(b.color), Color.green(b.color), Color.blue(b.color))
+            burstPaint.strokeWidth = 3f * (1f - age * 0.5f)
+            canvas.drawCircle(b.x, b.y, ringR, burstPaint)
 
-            // 内圈闪光
-            val flashRadius = targetRadius * (1f + age * 0.3f)
-            val flashAlpha = (opacity * 100).toInt().coerceIn(0, 255)
-            burstFillPaint.color = Color.argb(flashAlpha, Color.red(b.color), Color.green(b.color), Color.blue(b.color))
-            canvas.drawCircle(b.x, b.y, flashRadius, burstFillPaint)
-
-            // 判定文字（从中心向上飘）
-            if (age < 0.7f) {
-                val textAlpha = if (age < 0.3f) 255 else ((0.7f - age) / 0.4f * 255).toInt().coerceIn(0, 255)
-                gradeTextPaint.color = Color.argb(textAlpha, Color.red(b.color), Color.green(b.color), Color.blue(b.color))
-                gradeTextPaint.textSize = 20f + age * 8f
-                canvas.drawText(b.grade, b.x, b.y - targetRadius - 20f - age * 30f, gradeTextPaint)
-            }
-
-            // 粒子效果（Perfect 额外粒子）
-            if (b.grade == "PERFECT") {
-                val particlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    style = Paint.Style.FILL
-                    color = Color.argb((opacity * 180).toInt().coerceIn(0, 255), Color.red(b.color), Color.green(b.color), Color.blue(b.color))
-                }
-                for (i in 0 until 8) {
-                    val angle = i * Math.PI.toFloat() / 4f + age * 2f
-                    val dist = targetRadius + age * 45
-                    val px = b.x + kotlin.math.cos(angle) * dist
-                    val py = b.y + kotlin.math.sin(angle) * dist
-                    val pSize = 3f * (1f - age)
-                    canvas.drawCircle(px, py, pSize, particlePaint)
-                }
-            }
+            // 闪光
+            val flashA = (opacity * 80).toInt().coerceIn(0, 255)
+            burstFillPaint.color = Color.argb(flashA, Color.red(b.color), Color.green(b.color), Color.blue(b.color))
+            canvas.drawCircle(b.x, b.y, targetRadius * (1f + age * 0.3f), burstFillPaint)
         }
     }
 
-    /** 和弦贝塞尔曲线连线 */
+    /** 和弦连线 */
     private fun drawChordCurves(canvas: Canvas, gameTimeMs: Long) {
         for (group in timeGroups) {
             if (group.notes.size < 2) continue
             val t = group.timeMs - gameTimeMs
             if (t > APPROACH_TIME_MS || t < -200) continue
             val progress = (1.0 - t.toDouble() / APPROACH_TIME_MS).coerceIn(0.0, 1.0).toFloat()
-            val alpha = (progress * 200).toInt().coerceIn(0, 255)
-            val color = getNoteColor(group.notes.first().sequenceIndex)
-            chordPaint.color = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
-            chordPaint.strokeWidth = 2f + progress * 3f
+            val alpha = (progress * 120).toInt().coerceIn(0, 255)
+            chordPaint.color = Color.argb(alpha, 99, 102, 241)
 
             val path = Path()
             for (i in 0 until group.notes.size) {
                 val x = sx(baseX + group.notes[i].col * colSpacing)
                 val y = sy(baseY + group.notes[i].row * rowSpacing)
-                if (i == 0) { path.moveTo(x, y) }
+                if (i == 0) path.moveTo(x, y)
                 else {
                     val px = sx(baseX + group.notes[i - 1].col * colSpacing)
                     val py = sy(baseY + group.notes[i - 1].row * rowSpacing)
                     val midX = (px + x) / 2; val midY = (py + y) / 2
-                    val cpX = midX + (y - py) * 0.2f; val cpY = midY - (x - px) * 0.2f
-                    path.quadTo(cpX, cpY, x, y)
+                    path.quadTo(midX + (y - py) * 0.15f, midY - (x - px) * 0.15f, x, y)
                 }
             }
             canvas.drawPath(path, chordPaint)
@@ -308,8 +309,7 @@ class GameOverlayView(
 
     fun addHitEffect(row: Int, col: Int, grade: String) {
         val x = sx(baseX + col * colSpacing); val y = sy(baseY + row * rowSpacing)
-        val c = when (grade) { "perfect" -> Color.parseColor("#FFD700"); "great" -> Color.parseColor("#22C55E"); "good" -> Color.parseColor("#3B82F6"); else -> Color.parseColor("#EF4444") }
-        hitBursts.add(HitBurst(x, y, SystemClock.elapsedRealtime(), c, grade.uppercase()))
+        hitBursts.add(HitBurst(x, y, SystemClock.elapsedRealtime(), hitZoneGlow))
     }
 
     private fun drawCombo(canvas: Canvas) {
