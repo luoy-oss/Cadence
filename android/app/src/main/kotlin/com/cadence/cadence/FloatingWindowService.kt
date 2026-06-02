@@ -45,7 +45,6 @@ class FloatingWindowService : Service() {
     private var mainPanel: View? = null
     private var scoreSelectorPanel: View? = null
     private var calibrationView: CalibrationOverlayView? = null
-    private var countdownOverlay: View? = null
     private var gameOverlay: GameOverlayView? = null
 
     private var isBallShowing = false
@@ -436,6 +435,7 @@ class FloatingWindowService : Service() {
 
     // ========== 游戏覆盖层 ==========
 
+    /** 显示游戏覆盖层（立即显示命中区和待按琴键，不遮挡）*/
     fun showGameOverlay(events: List<GameOverlayView.NoteEvent>, durationMs: Long) {
         val handler = android.os.Handler(mainLooper)
         handler.post {
@@ -470,6 +470,14 @@ class FloatingWindowService : Service() {
         }
     }
 
+    /** 开始倒计时（在游戏覆盖层角落显示，不遮挡琴键）*/
+    fun startGameCountdown(seconds: Int, onFinished: (() -> Unit)? = null) {
+        gameOverlay?.startCountdown(seconds)
+        val handler = android.os.Handler(mainLooper)
+        handler.postDelayed({ onFinished?.invoke() }, seconds * 1000L)
+    }
+
+    /** 开始游戏动画 */
     fun startGameOverlay() {
         gameOverlay?.startGame()
     }
@@ -488,71 +496,12 @@ class FloatingWindowService : Service() {
         gameOverlay?.addHitEffect(row, col, grade)
     }
 
-    // ========== 倒计时覆盖层 ==========
-
+    // 旧的倒计时覆盖层方法保留兼容（但不再使用）
     fun showCountdown(seconds: Int, onFinished: (() -> Unit)? = null) {
-        val handler = android.os.Handler(mainLooper)
-        handler.post {
-            hideCountdown()
-            showCountdownOverlay(seconds, onFinished)
-        }
+        startGameCountdown(seconds, onFinished)
     }
-
-    fun updateCountdown(seconds: Int) {
-        val handler = android.os.Handler(mainLooper)
-        handler.post {
-            if (seconds <= 0) hideCountdown()
-            else countdownOverlay?.findViewWithTag<TextView>("countdownText")?.text = "$seconds"
-        }
-    }
-
-    fun hideCountdown() {
-        try { countdownOverlay?.let { windowManager?.removeView(it) } } catch (_: Exception) {}
-        countdownOverlay = null
-    }
-
-    private fun showCountdownOverlay(seconds: Int, onFinished: (() -> Unit)? = null) {
-        val overlay = FrameLayout(this).apply { setBackgroundColor(Color.argb(160, 0, 0, 0)) }
-        val textContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-
-        val countdownText = TextView(this).apply {
-            text = "$seconds"; setTextColor(Color.WHITE); textSize = 120f
-            gravity = Gravity.CENTER; typeface = Typeface.DEFAULT_BOLD; tag = "countdownText"
-        }
-        textContainer.addView(countdownText)
-        textContainer.addView(TextView(this).apply {
-            text = "秒后开始"; setTextColor(Color.parseColor("#BBBBBB")); textSize = 20f
-            gravity = Gravity.CENTER; setPadding(0, dpToPx(8), 0, 0)
-        })
-        overlay.addView(textContainer, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-
-        countdownOverlay = overlay
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSPARENT)
-
-        try { windowManager?.addView(countdownOverlay, params) } catch (e: Exception) { Log.e(TAG, "Error showing countdown", e) }
-
-        // 自动倒计时
-        var remaining = seconds
-        val handler = android.os.Handler(mainLooper)
-        val runnable = object : Runnable {
-            override fun run() {
-                remaining--
-                if (remaining <= 0) {
-                    hideCountdown()
-                    onFinished?.invoke()
-                } else {
-                    countdownText.text = "$remaining"
-                    handler.postDelayed(this, 1000)
-                }
-            }
-        }
-        handler.postDelayed(runnable, 1000)
-    }
+    fun updateCountdown(seconds: Int) {}
+    fun hideCountdown() {}
 
     // ========== 校准模式 ==========
 
