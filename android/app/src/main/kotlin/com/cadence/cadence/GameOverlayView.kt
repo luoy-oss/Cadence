@@ -86,6 +86,18 @@ class GameOverlayView(
         style = Paint.Style.FILL
         maskFilter = BlurMaskFilter(20f, BlurMaskFilter.Blur.NORMAL)
     }
+    // 预览指示器（下一个目标位置的脉冲光圈）
+    private val previewPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 2.5f
+    }
+    private val previewFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    // 方向箭头画笔
+    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 2f; strokeCap = Paint.Cap.ROUND
+        pathEffect = DashPathEffect(floatArrayOf(6f, 4f), 0f)
+    }
     private val dotBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeWidth = 2f; color = Color.WHITE
     }
@@ -181,6 +193,7 @@ class GameOverlayView(
 
         // 绘制
         drawHitZones(canvas)
+        drawPreviews(canvas, gameTimeMs)     // 下一步目标预览
         drawApproachRings(canvas, gameTimeMs)
         drawDotTrails(canvas)
         drawDots(canvas)
@@ -188,6 +201,63 @@ class GameOverlayView(
         drawCombo(canvas)
         drawProgressBar(canvas, gameTimeMs)
         postInvalidateDelayed(16)
+    }
+
+    /** 下一步目标预览（脉冲光圈 + 方向虚线）*/
+    private fun drawPreviews(canvas: Canvas, gameTimeMs: Long) {
+        // 找到当前和下一个时间组
+        var currentGroupIdx = -1
+        for (i in timeGroups.indices) {
+            if (timeGroups[i].timeMs <= gameTimeMs) currentGroupIdx = i
+        }
+        if (currentGroupIdx < 0 || currentGroupIdx + 1 >= timeGroups.size) return
+
+        val currentGroup = timeGroups[currentGroupIdx]
+        val nextGroup = timeGroups[currentGroupIdx + 1]
+        val timeUntilNext = nextGroup.timeMs - gameTimeMs
+
+        // 只在下一个目标进入提前窗口时显示预览
+        val previewWindow = APPROACH_TIME_MS
+        if (timeUntilNext > previewWindow || timeUntilNext < 0) return
+
+        // 预览强度：越接近越明显
+        val previewProgress = (1.0 - timeUntilNext.toDouble() / previewWindow).coerceIn(0.0, 1.0).toFloat()
+        val pulse = (sin(SystemClock.elapsedRealtime() * 0.008f) * 0.3f + 0.7f)  // 脉冲效果
+
+        for (note in nextGroup.notes) {
+            val tx = sx(baseX + note.col * colSpacing)
+            val ty = sy(baseY + note.row * rowSpacing)
+
+            // 预览光圈（脉冲大小）
+            val previewRadius = targetRadius * (0.8f + pulse * 0.4f) * previewProgress
+            val previewAlpha = (previewProgress * pulse * 160).toInt().coerceIn(0, 255)
+            previewPaint.color = Color.argb(previewAlpha, Color.red(dotColor), Color.green(dotColor), Color.blue(dotColor))
+            previewPaint.strokeWidth = 2f + previewProgress * 2f
+            canvas.drawCircle(tx, ty, previewRadius, previewPaint)
+
+            // 预览填充（微弱发光）
+            val fillAlpha = (previewProgress * pulse * 40).toInt().coerceIn(0, 255)
+            previewFillPaint.color = Color.argb(fillAlpha, Color.red(dotColor), Color.green(dotColor), Color.blue(dotColor))
+            canvas.drawCircle(tx, ty, targetRadius * 0.5f * previewProgress, previewFillPaint)
+
+            // 方向虚线（从当前光点位置指向预览位置）
+            if (activeDots.isNotEmpty()) {
+                val dot = activeDots[0]
+                val arrowAlpha = (previewProgress * 100).toInt().coerceIn(0, 255)
+                arrowPaint.color = Color.argb(arrowAlpha, Color.red(dotColor), Color.green(dotColor), Color.blue(dotColor))
+                // 只在不同位置时画箭头
+                val dx = tx - dot.x; val dy = ty - dot.y
+                val dist = sqrt(dx * dx + dy * dy)
+                if (dist > targetRadius * 2) {
+                    // 从光点边缘到预览边缘
+                    val startX = dot.x + dx / dist * targetRadius * 0.6f
+                    val startY = dot.y + dy / dist * targetRadius * 0.6f
+                    val endX = tx - dx / dist * targetRadius * 0.8f
+                    val endY = ty - dy / dist * targetRadius * 0.8f
+                    canvas.drawLine(startX, startY, endX, endY, arrowPaint)
+                }
+            }
+        }
     }
 
     /** 命中区（所有琴键位置的固定圆圈）*/
