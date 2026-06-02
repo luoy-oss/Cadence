@@ -1,7 +1,7 @@
 name: cadence
 description: "osu!-style rhythm game overlay for mobile"
 publish_to: 'none'
-version: 1.0.0-beta.11+11
+version: 1.0.0-beta.12+12
 
 environment:
   sdk: ^3.5.4
