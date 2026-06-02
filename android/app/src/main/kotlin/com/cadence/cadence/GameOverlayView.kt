@@ -53,6 +53,8 @@ class GameOverlayView(
     private val hitBursts = mutableListOf<HitBurst>()
 
     var onGameEnd: (() -> Unit)? = null
+    var onProgressUpdate: ((elapsedMs: Long, totalMs: Long) -> Unit)? = null
+    private var lastProgressCallbackMs = 0L
     private val screenOffset = IntArray(2)
     private fun sx(screenX: Float) = screenX - screenOffset[0]
     private fun sy(screenY: Float) = screenY - screenOffset[1]
@@ -87,9 +89,6 @@ class GameOverlayView(
         color = Color.WHITE; textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT_BOLD
         setShadowLayer(6f, 0f, 0f, Color.argb(200, 0, 0, 0))
-    }
-    private val burstPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 3f
     }
     private val burstFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val comboTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -168,6 +167,12 @@ class GameOverlayView(
             isPlaying = false; onGameEnd?.invoke(); return
         }
 
+        // 进度回调（节流 1次/秒）
+        if (totalDurationMs > 0 && now - lastProgressCallbackMs > 1000) {
+            lastProgressCallbackMs = now
+            onProgressUpdate?.invoke(gameTimeMs, totalDurationMs)
+        }
+
         // 命中区（始终显示）
         drawHitZones(canvas)
 
@@ -209,7 +214,6 @@ class GameOverlayView(
 
     /** O→o 缩圈：接下来 3 个待按琴键（1号在最上层）*/
     private fun drawUpcomingRings(canvas: Canvas, gameTimeMs: Long) {
-        // 找当前时间组之后的未命中组
         val upcoming = mutableListOf<TimeGroup>()
         for (g in timeGroups) {
             if (!g.hit && g.timeMs > gameTimeMs - 100) {
@@ -218,10 +222,9 @@ class GameOverlayView(
             }
         }
 
-        // 从后往前画（3号先画在底层，1号最后画在顶层）
         for (i in upcoming.indices.reversed()) {
             val group = upcoming[i]
-            val rank = i + 1  // 1=最近, 2=次近, 3=最远
+            val rank = i + 1
             val t = group.timeMs - gameTimeMs
             if (t > APPROACH_TIME_MS) continue
 
@@ -234,10 +237,26 @@ class GameOverlayView(
                 val cy = sy(baseY + note.row * rowSpacing)
                 val r = Color.red(color); val g = Color.green(color); val b = Color.blue(color)
 
+                // --- 1号目标：命中区脉冲发光 ---
+                if (rank == 1 && progress > 0.2f) {
+                    val pulse = (Math.sin(gameTimeMs * 0.01) * 0.3 + 0.7).toFloat()
+                    val glowAlpha = (pulse * 160 * progress).toInt().coerceIn(0, 255)
+                    val fillGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        style = Paint.Style.FILL
+                        maskFilter = BlurMaskFilter(18f, BlurMaskFilter.Blur.NORMAL)
+                        this.color = Color.argb(glowAlpha, r, g, b)
+                    }
+                    canvas.drawCircle(cx, cy, targetRadius * 1.1f, fillGlow)
+                }
+
                 // O→o 缩圈
                 val alpha = (progress * progress * 230).toInt().coerceIn(0, 255)
                 approachPaint.color = Color.argb(alpha, r, g, b)
-                approachPaint.strokeWidth = 3f + progress * 3f
+                approachPaint.strokeWidth = when (rank) {
+                    1 -> 5f + progress * 4f
+                    2 -> 3.5f + progress * 2.5f
+                    else -> 2.5f + progress * 1.5f
+                }
                 canvas.drawCircle(cx, cy, curRadius, approachPaint)
 
                 // 命中区发光（接近时）
@@ -251,22 +270,36 @@ class GameOverlayView(
                     canvas.drawCircle(cx, cy, targetRadius * 0.7f + 4, glowP)
                 }
 
-                // 编号（圆圈上方，rank 1/2/3）
-                val numAlpha = (progress * 200).toInt().coerceIn(0, 255)
+                // 编号（rank 越大字号越小）
+                val numAlpha = (progress * 220).toInt().coerceIn(0, 255)
                 numberPaint.color = Color.argb(numAlpha, r, g, b)
-                numberPaint.textSize = numberTextSize + progress * 4f
-                numberPaint.setShadowLayer(6f, 0f, 0f, Color.argb(180, 0, 0, 0))
+                numberPaint.textSize = when (rank) {
+                    1 -> numberTextSize * 1.3f + progress * 6f
+                    2 -> numberTextSize * 1.1f + progress * 4f
+                    else -> numberTextSize + progress * 3f
+                }
+                numberPaint.setShadowLayer(8f, 0f, 0f, Color.argb(200, 0, 0, 0))
                 canvas.drawText("$rank", cx, cy + numberTextSize * 0.35f, numberPaint)
+
+                // 1号目标中心脉冲指示点
+                if (rank == 1 && progress > 0.3f) {
+                    val dotPulse = (Math.sin(gameTimeMs * 0.012) * 0.3 + 0.7).toFloat()
+                    val dotAlpha = (progress * 200 * dotPulse).toInt().coerceIn(0, 255)
+                    val centerDot = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        style = Paint.Style.FILL
+                        this.color = Color.argb(dotAlpha, r, g, b)
+                    }
+                    canvas.drawCircle(cx, cy, 5f + progress * 3f, centerDot)
+                }
             }
         }
     }
 
-    /** 方向虚线（从当前光点到 1 号目标）*/
+    /** 方向指示（从当前光点到 1 号目标）*/
     private fun drawArrows(canvas: Canvas, gameTimeMs: Long) {
         if (activeDots.isEmpty()) return
         val dot = activeDots[0]
 
-        // 找 1 号目标
         val nextGroup = timeGroups.firstOrNull { !it.hit && it.timeMs > gameTimeMs - 100 } ?: return
         val t = nextGroup.timeMs - gameTimeMs
         if (t > APPROACH_TIME_MS || t < 0) return
@@ -280,14 +313,27 @@ class GameOverlayView(
         if (dist < targetRadius * 2) return
 
         val progress = (1.0 - t.toDouble() / APPROACH_TIME_MS).coerceIn(0.0, 1.0).toFloat()
-        val arrowAlpha = (progress * 100).toInt().coerceIn(0, 255)
+        val pulse = (Math.sin(gameTimeMs * 0.008) * 0.2 + 0.8).toFloat()
+        val arrowAlpha = (progress * 160 * pulse).toInt().coerceIn(0, 255)
+
+        // 更粗更亮的方向线
         arrowPaint.color = Color.argb(arrowAlpha, 255, 215, 0)
+        arrowPaint.strokeWidth = 2.5f + progress * 2f
 
         val startX = dot.x + dx / dist * targetRadius * 0.6f
         val startY = dot.y + dy / dist * targetRadius * 0.6f
         val endX = tx - dx / dist * targetRadius * 0.8f
         val endY = ty - dy / dist * targetRadius * 0.8f
         canvas.drawLine(startX, startY, endX, endY, arrowPaint)
+
+        // 箭头端点发光圆
+        val headAlpha = (progress * 200 * pulse).toInt().coerceIn(0, 255)
+        val headPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            this.color = Color.argb(headAlpha, 255, 215, 0)
+            maskFilter = BlurMaskFilter(6f, BlurMaskFilter.Blur.NORMAL)
+        }
+        canvas.drawCircle(endX, endY, 5f + progress * 3f, headPaint)
     }
 
     /** 更新光点位置 */
@@ -378,20 +424,16 @@ class GameOverlayView(
         }
     }
 
-    /** 命中爆炸 */
+    /** 命中闪光（无扩圈） */
     private fun drawHitBursts(canvas: Canvas, now: Long) {
         val it = hitBursts.iterator()
         while (it.hasNext()) {
             val b = it.next()
-            val age = (now - b.startTime).toFloat() / 500f
+            val age = (now - b.startTime).toFloat() / 300f
             if (age >= 1f) { it.remove(); continue }
             val opacity = (1f - age)
-            val ringR = targetRadius + age * 50
-            burstPaint.color = Color.argb((opacity * 180).toInt().coerceIn(0, 255), Color.red(b.color), Color.green(b.color), Color.blue(b.color))
-            burstPaint.strokeWidth = 3f * (1f - age * 0.5f)
-            canvas.drawCircle(b.x, b.y, ringR, burstPaint)
-            burstFillPaint.color = Color.argb((opacity * 60).toInt().coerceIn(0, 255), Color.red(b.color), Color.green(b.color), Color.blue(b.color))
-            canvas.drawCircle(b.x, b.y, targetRadius * (1f + age * 0.2f), burstFillPaint)
+            burstFillPaint.color = Color.argb((opacity * 80).toInt().coerceIn(0, 255), Color.red(b.color), Color.green(b.color), Color.blue(b.color))
+            canvas.drawCircle(b.x, b.y, targetRadius * 0.7f * (1f + age * 0.15f), burstFillPaint)
         }
     }
 

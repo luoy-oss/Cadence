@@ -457,6 +457,13 @@ class FloatingWindowService : Service() {
                     val handler2 = android.os.Handler(mainLooper)
                     handler2.post { stopGameOverlay() }
                 }
+                onProgressUpdate = { elapsed, total ->
+                    if (total > 0) {
+                        val pct = (elapsed * 100 / total).toInt().coerceIn(0, 100)
+                        val eSec = elapsed / 1000; val tSec = total / 1000
+                        updateStatusText("♪ ${eSec}s / ${tSec}s ($pct%)")
+                    }
+                }
             }
 
             val params = WindowManager.LayoutParams(
@@ -487,8 +494,8 @@ class FloatingWindowService : Service() {
             override fun run() {
                 remaining--
                 if (remaining <= 0) {
-                    hideStatusText()
                     onFinished?.invoke()
+                    // 不隐藏状态文本 — 进度回调会继续更新
                 } else {
                     updateStatusText("⏱ $remaining 秒")
                     handler.postDelayed(this, 1000)
@@ -496,7 +503,6 @@ class FloatingWindowService : Service() {
             }
         }
         handler.postDelayed(countdownRunnable, 1000)
-        handler.postDelayed({ onFinished?.invoke() }, seconds * 1000L)
     }
 
     /** 开始游戏动画 */
@@ -541,6 +547,24 @@ class FloatingWindowService : Service() {
                 setBackgroundColor(Color.argb(200, 15, 15, 20))
                 setPadding(dpToPx(12), dpToPx(6), dpToPx(12), dpToPx(6))
             }
+
+            // 跟随悬浮球位置
+            val ballParams = floatingBall?.layoutParams as? WindowManager.LayoutParams
+            val ballSize = dpToPx(50)
+            val screenW = resources.displayMetrics.widthPixels
+            val textX: Int
+            val textY: Int
+            if (ballParams != null) {
+                textY = ballParams.y + ballSize / 2 - dpToPx(14)
+                textX = if (ballParams.x < screenW / 2) {
+                    ballParams.x + ballSize + dpToPx(4)
+                } else {
+                    ballParams.x - dpToPx(120)
+                }
+            } else {
+                textX = dpToPx(60); textY = dpToPx(300)
+            }
+
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -549,8 +573,7 @@ class FloatingWindowService : Service() {
                 PixelFormat.TRANSPARENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                x = dpToPx(60)  // 悬浮球右边
-                y = dpToPx(300) // 与悬浮球同高度
+                x = textX; y = textY
             }
             try {
                 windowManager?.addView(tv, params)
