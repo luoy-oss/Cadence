@@ -1,0 +1,109 @@
+name: Build Android
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.24.5'
+
+jobs:
+  build-android:
+    name: Android (${{ matrix.target_arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target_arch: arm64-v8a
+            build_args: '--target-platform android-arm64'
+          - target_arch: armeabi-v7a
+            build_args: '--target-platform android-arm'
+          - target_arch: x86_64
+            build_args: '--target-platform android-x64'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter build apk --release --no-tree-shake-icons --split-per-abi ${{ matrix.build_args }}
+
+      - name: Rename APK
+        run: mv build/app/outputs/flutter-apk/*.apk build/app/outputs/flutter-apk/cadence-${{ matrix.target_arch }}.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.target_arch }}
+          path: build/app/outputs/flutter-apk/cadence-*.apk
+
+  release:
+    name: Create Release
+    needs: [build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Check if pre-release
+        id: prerelease
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          if [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"alpha"* ]] || [[ "$VERSION" == *"pre"* ]] || [[ "$VERSION" == *"rc"* ]]; then
+            echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
+            echo "RELEASE_TYPE=Pre-release" >> $GITHUB_OUTPUT
+          else
+            echo "IS_PRERELEASE=false" >> $GITHUB_OUTPUT
+            echo "RELEASE_TYPE=Release" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: "Cadence ${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## Cadence ${{ steps.version.outputs.VERSION }} (${{ steps.prerelease.outputs.RELEASE_TYPE }})
+
+            osu! 风格音游悬浮覆盖层
+
+            ${{ steps.prerelease.outputs.IS_PRERELEASE == 'true' && '> ⚠️ **这是一个预发布版本，可能存在问题**' || '' }}
+
+            ### 下载说明
+
+            | 架构 | 文件 |
+            |------|------|
+            | ARM64 | `cadence-arm64-v8a.apk` |
+            | ARMv7 | `cadence-armeabi-v7a.apk` |
+            | x86_64 | `cadence-x86_64.apk` |
+
+            **安装**: 下载 APK 文件直接安装（需要开启未知来源安装）
+
+            ### 使用方法
+
+            1. 授予悬浮窗权限
+            2. 导入 JSON 格式琴谱（Sky Studio 格式）
+            3. 在「按键校准」中调整琴键位置
+            4. 选择乐谱，点击「开始游戏」
+            5. 切换到目标游戏，按照覆盖层指示弹奏
+          files: |
+            artifacts/apk-arm64-v8a/cadence-*.apk
+            artifacts/apk-armeabi-v7a/cadence-*.apk
+            artifacts/apk-x86_64/cadence-*.apk
+          draft: false
+          prerelease: ${{ steps.prerelease.outputs.IS_PRERELEASE == 'true' }}

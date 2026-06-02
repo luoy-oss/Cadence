@@ -1,0 +1,24 @@
+name: cadence
+description: "osu!-style rhythm game overlay for mobile"
+publish_to: 'none'
+version: 1.0.0-beta.1+1
+
+environment:
+  sdk: ^3.5.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^2.6.1
+  shared_preferences: ^2.3.3
+  file_picker: ^8.1.4
+  path_provider: ^2.1.5
+  uuid: ^4.5.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
