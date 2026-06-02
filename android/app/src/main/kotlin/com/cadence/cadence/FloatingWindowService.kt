@@ -58,6 +58,9 @@ class FloatingWindowService : Service() {
     private var selectedScoreName = "未选择"
     private var selectedScoreId: String? = null
 
+    // 游戏速度（1.0 = 原速）
+    private var gameSpeed = 1.0f
+
     // 校准参数
     private var baseX = 0f
     private var baseY = 0f
@@ -210,6 +213,42 @@ class FloatingWindowService : Service() {
             setOnClickListener { showScoreSelector() }
         })
         contentLayout.addView(scoreRow)
+        contentLayout.addView(createDivider())
+
+        // 速度控制
+        val speedLabel = TextView(this).apply {
+            text = "速度: ${String.format("%.1f", gameSpeed)}x"
+            setTextColor(Color.WHITE); textSize = 13f
+        }
+        contentLayout.addView(speedLabel)
+
+        fun updateSpeedLabel() { speedLabel.text = "速度: ${String.format("%.1f", gameSpeed)}x" }
+        fun speedToProgress(s: Float) = ((s - 0.1f) / 0.1f).toInt().coerceIn(0, 99)
+        fun progressToSpeed(p: Int) = (0.1f + p * 0.1f).coerceIn(0.1f, 10.0f)
+
+        val speedBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dpToPx(4), 0, dpToPx(8))
+        }
+        speedBar.addView(createSmallButton("−") {
+            gameSpeed = (gameSpeed - if (gameSpeed <= 1.0f) 0.1f else 0.5f).coerceAtLeast(0.1f)
+            updateSpeedLabel()
+        })
+        speedBar.addView(SeekBar(this).apply {
+            max = 99; progress = speedToProgress(gameSpeed)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { gameSpeed = progressToSpeed(p); updateSpeedLabel() }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = dpToPx(8); marginEnd = dpToPx(8)
+        })
+        speedBar.addView(createSmallButton("+") {
+            gameSpeed = (gameSpeed + if (gameSpeed < 1.0f) 0.1f else 0.5f).coerceAtMost(10.0f)
+            updateSpeedLabel()
+        })
+        contentLayout.addView(speedBar)
         contentLayout.addView(createDivider())
 
         // 播放控制按钮
@@ -366,6 +405,7 @@ class FloatingWindowService : Service() {
             stopGameOverlay()
 
             gameOverlay = GameOverlayView(this, baseX, baseY, colSpacing, rowSpacing).apply {
+                setSpeed(gameSpeed)
                 setGameData(events, durationMs)
                 onGameEnd = {
                     val handler2 = android.os.Handler(mainLooper)
@@ -519,6 +559,15 @@ class FloatingWindowService : Service() {
             setBackgroundColor(Color.parseColor("#33333333"))
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1))
                 .apply { topMargin = dpToPx(8); bottomMargin = dpToPx(8) }
+        }
+    }
+
+    private fun createSmallButton(text: String, onClick: () -> Unit): TextView {
+        return TextView(this).apply {
+            this.text = text; setTextColor(Color.WHITE); textSize = 16f; gravity = Gravity.CENTER
+            val bg = GradientDrawable(); bg.setColor(Color.parseColor("#3A3A3A")); bg.cornerRadius = dpToPx(4).toFloat(); background = bg
+            setPadding(dpToPx(12), dpToPx(4), dpToPx(12), dpToPx(4))
+            setOnClickListener { onClick() }
         }
     }
 
