@@ -60,6 +60,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     }
   }
 
+  /// 启动后延迟验证 Service 是否真的在运行
+  Future<void> _verifyRunning() async {
+    await Future.delayed(const Duration(milliseconds: 800));
+    if (!mounted) return;
+    final running = await OverlayService.isRunning();
+    if (!running && _isOverlayRunning) {
+      // Service 没有真正启动，回滚状态
+      setState(() {
+        _isOverlayRunning = false;
+        _callbacksSet = false;
+      });
+    }
+  }
+
   void _setupFloatingCallbacks() {
     OverlayService.setCallbacks(
       onPlay: () {
@@ -303,9 +317,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                       if (value) {
                         final started = await OverlayService.start();
                         if (started) {
-                          // start() 返回 true 说明 Service 已启动，直接更新状态
+                          // 乐观更新：先信任 start() 返回值
                           setState(() => _isOverlayRunning = true);
                           _setupFloatingCallbacks();
+                          // 延迟验证 Service 是否真正在运行
+                          _verifyRunning();
                         }
                       } else {
                         await OverlayService.stop();
