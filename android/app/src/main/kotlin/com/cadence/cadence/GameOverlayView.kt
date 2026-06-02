@@ -73,7 +73,7 @@ class GameOverlayView(
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 4f
-        maskFilter = MaskFilter.blur(BlurStyle.NORMAL, 6f)
+        maskFilter = BlurMaskFilter(6f, BlurMaskFilter.Blur.NORMAL)
     }
     private val comboTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#FFD700")
