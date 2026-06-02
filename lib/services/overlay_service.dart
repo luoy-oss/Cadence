@@ -4,134 +4,99 @@ import 'package:flutter/services.dart';
 class OverlayService {
   static const _channel = MethodChannel('com.cadence/overlay');
 
-  // ========== 权限相关 ==========
+  // ========== 权限 ==========
 
-  /// 检查悬浮窗权限
   static Future<bool> checkPermission() async {
-    try {
-      final result = await _channel.invokeMethod<bool>('checkOverlayPermission');
-      return result ?? false;
-    } catch (_) {
-      return false;
-    }
+    try { return await _channel.invokeMethod<bool>('checkOverlayPermission') ?? false; } catch (_) { return false; }
   }
 
-  /// 请求悬浮窗权限
   static Future<void> requestPermission() async {
-    try {
-      await _channel.invokeMethod('requestOverlayPermission');
-    } catch (_) {}
+    try { await _channel.invokeMethod('requestOverlayPermission'); } catch (_) {}
   }
 
   // ========== 悬浮窗控制 ==========
 
-  /// 启动悬浮窗
   static Future<bool> start() async {
-    try {
-      final result = await _channel.invokeMethod<bool>('startOverlay');
-      return result ?? false;
-    } catch (_) {
-      return false;
-    }
+    try { return await _channel.invokeMethod<bool>('startOverlay') ?? false; } catch (_) { return false; }
   }
 
-  /// 停止悬浮窗
   static Future<void> stop() async {
-    try {
-      await _channel.invokeMethod('stopOverlay');
-    } catch (_) {}
+    try { await _channel.invokeMethod('stopOverlay'); } catch (_) {}
   }
 
-  /// 检查悬浮窗是否运行中
   static Future<bool> isRunning() async {
-    try {
-      final result = await _channel.invokeMethod<bool>('isOverlayRunning');
-      return result ?? false;
-    } catch (_) {
-      return false;
-    }
+    try { return await _channel.invokeMethod<bool>('isOverlayRunning') ?? false; } catch (_) { return false; }
   }
 
-  // ========== 数据同步到悬浮窗 ==========
+  // ========== 数据同步 ==========
 
-  /// 发送曲目列表到悬浮窗
   static Future<void> sendScoreList(List<Map<String, String>> scores) async {
-    try {
-      await _channel.invokeMethod('sendScoreList', scores);
-    } catch (_) {}
+    try { await _channel.invokeMethod('sendScoreList', scores); } catch (_) {}
   }
 
-  /// 更新选中的曲目名称
   static Future<void> updateSelectedScore(String name) async {
-    try {
-      await _channel.invokeMethod('updateSelectedScore', name);
-    } catch (_) {}
+    try { await _channel.invokeMethod('updateSelectedScore', name); } catch (_) {}
   }
 
-  /// 发送按键位置配置到悬浮窗
   static Future<void> sendKeyConfig(Map<String, dynamic> config) async {
+    try { await _channel.invokeMethod('sendKeyConfig', config); } catch (_) {}
+  }
+
+  // ========== 游戏控制 ==========
+
+  /// 发送游戏数据并开始（含倒计时）
+  static Future<void> startGameWithData({
+    required List<Map<String, dynamic>> notes,
+    required int durationMs,
+    required int countdownSeconds,
+  }) async {
     try {
-      await _channel.invokeMethod('sendKeyConfig', config);
+      await _channel.invokeMethod('startGameWithData', {
+        'notes': notes,
+        'durationMs': durationMs,
+        'countdownSeconds': countdownSeconds,
+      });
     } catch (_) {}
   }
 
-  // ========== 倒计时 ==========
-
-  static Future<void> showCountdown(int seconds) async {
-    try {
-      await _channel.invokeMethod('showCountdown', seconds);
-    } catch (_) {}
+  static Future<void> stopGame() async {
+    try { await _channel.invokeMethod('stopGame'); } catch (_) {}
   }
 
-  static Future<void> updateCountdown(int seconds) async {
-    try {
-      await _channel.invokeMethod('updateCountdown', seconds);
-    } catch (_) {}
+  static Future<void> updateGameScore(int score, int combo) async {
+    try { await _channel.invokeMethod('updateGameScore', {'score': score, 'combo': combo}); } catch (_) {}
   }
 
-  static Future<void> hideCountdown() async {
-    try {
-      await _channel.invokeMethod('hideCountdown');
-    } catch (_) {}
+  static Future<void> addHitEffect(int row, int col, String grade) async {
+    try { await _channel.invokeMethod('addHitEffect', {'row': row, 'col': col, 'grade': grade}); } catch (_) {}
   }
 
   // ========== 回调设置 ==========
 
-  /// 设置悬浮窗到 Flutter 的回调
   static Future<void> setCallbacks({
     required Function() onPlay,
     required Function() onPause,
     required Function() onStop,
+    required Function(String) onSelectScore,
     required Function(double, double, double, double) onCalibrationChanged,
     Function()? onPanelOpened,
   }) async {
-    try {
-      await _channel.invokeMethod('setCallbacks');
-    } catch (_) {}
+    try { await _channel.invokeMethod('setCallbacks'); } catch (_) {}
 
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
-        case 'onPlay':
-          onPlay();
-          break;
-        case 'onPause':
-          onPause();
-          break;
-        case 'onStop':
-          onStop();
-          break;
+        case 'onPlay': onPlay(); break;
+        case 'onPause': onPause(); break;
+        case 'onStop': onStop(); break;
+        case 'onSelectScore': onSelectScore(call.arguments as String? ?? ''); break;
         case 'onCalibrationChanged':
           final args = call.arguments as Map<dynamic, dynamic>;
           onCalibrationChanged(
-            (args['baseX'] as num).toDouble(),
-            (args['baseY'] as num).toDouble(),
-            (args['colSpacing'] as num).toDouble(),
-            (args['rowSpacing'] as num).toDouble(),
+            (args['baseX'] as num).toDouble(), (args['baseY'] as num).toDouble(),
+            (args['colSpacing'] as num).toDouble(), (args['rowSpacing'] as num).toDouble(),
           );
           break;
-        case 'onPanelOpened':
-          onPanelOpened?.call();
-          break;
+        case 'onPanelOpened': onPanelOpened?.call(); break;
       }
     });
   }

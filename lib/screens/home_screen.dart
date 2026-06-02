@@ -77,14 +77,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
   void _setupFloatingCallbacks() {
     OverlayService.setCallbacks(
       onPlay: () {
-        // 悬浮窗点击播放 - 跳转游戏页面
+        // 悬浮窗点击播放 - 发送游戏数据到原生覆盖层
         final selected = ref.read(scoreListProvider).selectedScore;
-        if (selected != null && mounted) {
-          Navigator.pushNamed(context, '/game');
+        if (selected == null || selected.events.isEmpty) return;
+
+        // 构建音符事件列表
+        final notes = <Map<String, dynamic>>[];
+        for (final event in selected.events) {
+          if (event.isRest) continue;
+          for (final note in event.notes) {
+            notes.add({
+              'row': note.row,
+              'col': note.col,
+              'timeMs': event.time,
+            });
+          }
         }
+
+        // 计算总时长
+        final lastTime = selected.events.isNotEmpty
+            ? selected.events.last.time
+            : 0;
+
+        // 发送到原生覆盖层（含倒计时 + 游戏数据）
+        OverlayService.startGameWithData(
+          notes: notes,
+          durationMs: lastTime + 2000,  // 额外 2s 缓冲
+          countdownSeconds: 3,
+        );
       },
       onPause: () {},
-      onStop: () {},
+      onStop: () {
+        OverlayService.stopGame();
+      },
+      onSelectScore: (id) {
+        ref.read(scoreListProvider.notifier).selectScore(id);
+      },
       onCalibrationChanged: (baseX, baseY, colSpacing, rowSpacing) {
         ref.read(settingsProvider.notifier).updateConfig(
           ref.read(settingsProvider).copyWith(
