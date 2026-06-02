@@ -105,6 +105,33 @@ class ScoreListNotifier extends StateNotifier<ScoreListState> {
     return score;
   }
 
+  /// 添加内置测试曲目（小星星）
+  Future<void> addTestSong() async {
+    // 小星星：1 1 5 5 6 6 5 - 4 4 3 3 2 2 1
+    // 节奏：每个音符间隔 500ms，最后一个音延长
+    const testJson = '''[{
+  "name": "小星星（测试）",
+  "bpm": 120,
+  "songNotes": [
+    {"time": 0, "key": "1Key7"},
+    {"time": 500, "key": "1Key7"},
+    {"time": 1000, "key": "1Key11"},
+    {"time": 1500, "key": "1Key11"},
+    {"time": 2000, "key": "1Key12"},
+    {"time": 2500, "key": "1Key12"},
+    {"time": 3000, "key": "1Key11"},
+    {"time": 4000, "key": "1Key10"},
+    {"time": 4500, "key": "1Key10"},
+    {"time": 5000, "key": "1Key9"},
+    {"time": 5500, "key": "1Key9"},
+    {"time": 6000, "key": "1Key8"},
+    {"time": 6500, "key": "1Key8"},
+    {"time": 7000, "key": "1Key7"}
+  ]
+}]''';
+    await importScore('小星星（测试）', testJson);
+  }
+
   /// 删除乐谱
   Future<void> deleteScore(String id) async {
     state = state.copyWith(

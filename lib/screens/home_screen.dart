@@ -77,9 +77,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
   void _setupFloatingCallbacks() {
     OverlayService.setCallbacks(
       onPlay: () {
-        // 悬浮窗点击播放 - 发送游戏数据到原生覆盖层
+        // 悬浮窗点击播放 - 先同步校准配置，再发送游戏数据
         final selected = ref.read(scoreListProvider).selectedScore;
         if (selected == null || selected.events.isEmpty) return;
+
+        // 确保校准配置同步到原生端
+        final config = ref.read(settingsProvider);
+        OverlayService.sendKeyConfig(config.toJson());
 
         // 构建音符事件列表
         final notes = <Map<String, dynamic>>[];
@@ -95,14 +99,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
         }
 
         // 计算总时长
-        final lastTime = selected.events.isNotEmpty
-            ? selected.events.last.time
-            : 0;
+        final lastTime = selected.events.last.time;
 
         // 发送到原生覆盖层（含倒计时 + 游戏数据）
         OverlayService.startGameWithData(
           notes: notes,
-          durationMs: lastTime + 2000,  // 额外 2s 缓冲
+          durationMs: lastTime + 2000,
           countdownSeconds: 3,
         );
       },
@@ -486,24 +488,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
   }
 
   Widget _buildFab() {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: AppColors.gradientPrimary,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.4),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 测试曲目按钮
+        Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.glassBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: FloatingActionButton(
-        onPressed: _importScore,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        child: const Icon(Icons.add_rounded, color: Colors.white, size: 28),
-      ),
+          child: FloatingActionButton.small(
+            onPressed: _addTestSong,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            heroTag: 'test',
+            child: const Icon(Icons.science_rounded, color: AppColors.accent, size: 22),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // 导入按钮
+        Container(
+          decoration: BoxDecoration(
+            gradient: AppColors.gradientPrimary,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primary.withOpacity(0.4),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: FloatingActionButton(
+            onPressed: _importScore,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            heroTag: 'import',
+            child: const Icon(Icons.add_rounded, color: Colors.white, size: 28),
+          ),
+        ),
+      ],
     );
   }
 
@@ -530,6 +562,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
       }
     } catch (e) {
       _showSnackBar('导入失败: $e', isError: true);
+    }
+  }
+
+  Future<void> _addTestSong() async {
+    try {
+      await ref.read(scoreListProvider.notifier).addTestSong();
+      _showSnackBar('已添加测试曲目：小星星');
+    } catch (e) {
+      _showSnackBar('添加失败: $e', isError: true);
     }
   }
 
