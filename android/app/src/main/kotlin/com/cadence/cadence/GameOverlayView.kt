@@ -52,10 +52,6 @@ class GameOverlayView(
     data class HitBurst(val x: Float, val y: Float, val startTime: Long, val color: Int)
     private val hitBursts = mutableListOf<HitBurst>()
 
-    // 倒计时
-    private var countdownRemaining = 0
-    private var isCountdown = false
-
     var onGameEnd: (() -> Unit)? = null
     private val screenOffset = IntArray(2)
     private fun sx(screenX: Float) = screenX - screenOffset[0]
@@ -108,12 +104,6 @@ class GameOverlayView(
         color = Color.argb(60, 255, 255, 255)
     }
     private val progressFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    // 倒计时画笔（角落小字，不遮挡）
-    private val countdownPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(180, 255, 255, 255); textSize = 28f
-        textAlign = Paint.Align.RIGHT; typeface = Typeface.DEFAULT_BOLD
-        setShadowLayer(4f, 0f, 0f, Color.argb(150, 0, 0, 0))
-    }
     // 方向虚线
     private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeWidth = 2f; strokeCap = Paint.Cap.ROUND
@@ -141,22 +131,6 @@ class GameOverlayView(
         noteEvents = mutable
     }
 
-    /** 开始倒计时（在角落显示，不遮挡）*/
-    fun startCountdown(seconds: Int) {
-        countdownRemaining = seconds; isCountdown = true
-        val handler = android.os.Handler(context.mainLooper)
-        val runnable = object : Runnable {
-            override fun run() {
-                countdownRemaining--
-                if (countdownRemaining <= 0) { isCountdown = false }
-                else { handler.postDelayed(this, 1000) }
-                invalidate()
-            }
-        }
-        handler.postDelayed(runnable, 1000)
-        invalidate()
-    }
-
     fun startGame() {
         gameStartTimeMs = SystemClock.elapsedRealtime()
         isPlaying = true
@@ -165,7 +139,7 @@ class GameOverlayView(
     }
 
     fun stopGame() {
-        isPlaying = false; isCountdown = false
+        isPlaying = false
         activeDots.clear(); hitBursts.clear()
         invalidate()
     }
@@ -183,7 +157,7 @@ class GameOverlayView(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (!isPlaying && !isCountdown) return
+        if (!isPlaying) return
         getLocationOnScreen(screenOffset)
 
         val now = SystemClock.elapsedRealtime()
@@ -217,9 +191,6 @@ class GameOverlayView(
 
         // 进度条
         drawProgressBar(canvas, gameTimeMs)
-
-        // 倒计时（角落，不遮挡）
-        if (isCountdown) drawCountdown(canvas)
 
         postInvalidateDelayed(16)
     }
@@ -422,12 +393,6 @@ class GameOverlayView(
             burstFillPaint.color = Color.argb((opacity * 60).toInt().coerceIn(0, 255), Color.red(b.color), Color.green(b.color), Color.blue(b.color))
             canvas.drawCircle(b.x, b.y, targetRadius * (1f + age * 0.2f), burstFillPaint)
         }
-    }
-
-    /** 倒计时（右上角小字）*/
-    private fun drawCountdown(canvas: Canvas) {
-        val text = "⏱ $countdownRemaining"
-        canvas.drawText(text, width - 20f, 60f + 40f, countdownPaint)
     }
 
     private var combo = 0; private var score = 0

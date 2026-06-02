@@ -66,9 +66,13 @@ class FloatingWindowService : Service() {
     private var colSpacing = 150f
     private var rowSpacing = 120f
 
-    // 显示参数
-    private var circleSize = 36f   // 目标圆半径
-    private var numberSize = 22f   // 编号字号
+    // 显示参数（默认值会在 showGameOverlay 时根据间距自动计算）
+    private var circleSize = 0f    // 0 = 自动计算
+    private var numberSize = 0f    // 0 = 自动计算
+
+    // 悬浮状态文本（倒计时/进度）
+    private var statusTextView: TextView? = null
+    private var statusShowing = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -260,7 +264,7 @@ class FloatingWindowService : Service() {
         }
         contentLayout.addView(circleLabel)
         contentLayout.addView(SeekBar(this).apply {
-            max = 60; progress = (circleSize - 20).toInt()
+            max = 100; progress = (circleSize.coerceIn(20f, 120f) - 20).toInt()
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { circleSize = (20 + p).toFloat(); circleLabel.text = "圆圈大小: ${circleSize.toInt()}" }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
@@ -276,7 +280,7 @@ class FloatingWindowService : Service() {
         }
         contentLayout.addView(fontLabel)
         contentLayout.addView(SeekBar(this).apply {
-            max = 22; progress = (numberSize - 14).toInt()
+            max = 34; progress = (numberSize.coerceIn(14f, 48f) - 14).toInt()
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { numberSize = (14 + p).toFloat(); fontLabel.text = "编号字号: ${numberSize.toInt()}" }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
@@ -441,9 +445,13 @@ class FloatingWindowService : Service() {
         handler.post {
             stopGameOverlay()
 
+            // 自动计算合适大小：基于间距的 30%
+            val autoCircle = if (circleSize > 0) circleSize else (minOf(colSpacing, rowSpacing) * 0.3f).coerceIn(24f, 80f)
+            val autoNumber = if (numberSize > 0) numberSize else (autoCircle * 0.6f).coerceIn(14f, 36f)
+
             gameOverlay = GameOverlayView(this, baseX, baseY, colSpacing, rowSpacing).apply {
                 setSpeed(gameSpeed)
-                setDisplayParams(circleSize, circleSize * 2.5f, numberSize)
+                setDisplayParams(autoCircle, autoCircle * 2.5f, autoNumber)
                 setGameData(events, durationMs)
                 onGameEnd = {
                     val handler2 = android.os.Handler(mainLooper)
@@ -470,10 +478,24 @@ class FloatingWindowService : Service() {
         }
     }
 
-    /** 开始倒计时（在游戏覆盖层角落显示，不遮挡琴键）*/
+    /** 开始倒计时（悬浮球旁边显示）*/
     fun startGameCountdown(seconds: Int, onFinished: (() -> Unit)? = null) {
-        gameOverlay?.startCountdown(seconds)
+        showStatusText("⏱ $seconds 秒")
+        var remaining = seconds
         val handler = android.os.Handler(mainLooper)
+        val countdownRunnable = object : Runnable {
+            override fun run() {
+                remaining--
+                if (remaining <= 0) {
+                    hideStatusText()
+                    onFinished?.invoke()
+                } else {
+                    updateStatusText("⏱ $remaining 秒")
+                    handler.postDelayed(this, 1000)
+                }
+            }
+        }
+        handler.postDelayed(countdownRunnable, 1000)
         handler.postDelayed({ onFinished?.invoke() }, seconds * 1000L)
     }
 
@@ -486,6 +508,7 @@ class FloatingWindowService : Service() {
         gameOverlay?.stopGame()
         try { gameOverlay?.let { windowManager?.removeView(it) } } catch (_: Exception) {}
         gameOverlay = null; isGameShowing = false
+        hideStatusText()
     }
 
     fun updateGameScore(score: Int, combo: Int) {
@@ -494,6 +517,62 @@ class FloatingWindowService : Service() {
 
     fun addGameHitEffect(row: Int, col: Int, grade: String) {
         gameOverlay?.addHitEffect(row, col, grade)
+    }
+
+    /** 更新进度（悬浮球旁边）*/
+    fun updateGameProgress(current: Int, total: Int) {
+        if (total > 0) {
+            val pct = (current * 100 / total)
+            updateStatusText("♪ $current/$total ($pct%)")
+        }
+    }
+
+    // ========== 悬浮状态文本（倒计时/进度）==========
+
+    private fun showStatusText(text: String) {
+        val handler = android.os.Handler(mainLooper)
+        handler.post {
+            hideStatusText()
+            val tv = TextView(this).apply {
+                this.text = text
+                setTextColor(Color.WHITE)
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setBackgroundColor(Color.argb(200, 15, 15, 20))
+                setPadding(dpToPx(12), dpToPx(6), dpToPx(12), dpToPx(6))
+            }
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSPARENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = dpToPx(60)  // 悬浮球右边
+                y = dpToPx(300) // 与悬浮球同高度
+            }
+            try {
+                windowManager?.addView(tv, params)
+                statusTextView = tv
+                statusShowing = true
+            } catch (e: Exception) {
+                Log.e(TAG, "Error showing status text", e)
+            }
+        }
+    }
+
+    private fun updateStatusText(text: String) {
+        val handler = android.os.Handler(mainLooper)
+        handler.post { statusTextView?.text = text }
+    }
+
+    private fun hideStatusText() {
+        val handler = android.os.Handler(mainLooper)
+        handler.post {
+            try { statusTextView?.let { windowManager?.removeView(it) } } catch (_: Exception) {}
+            statusTextView = null; statusShowing = false
+        }
     }
 
     // 旧的倒计时覆盖层方法保留兼容（但不再使用）
@@ -579,7 +658,7 @@ class FloatingWindowService : Service() {
 
     override fun onDestroy() {
         isRunning = false
-        stopCalibrationMode(); hideCountdown(); stopGameOverlay(); hideScoreSelector(); hideMainPanel(); hideFloatingBall()
+        stopCalibrationMode(); hideStatusText(); hideCountdown(); stopGameOverlay(); hideScoreSelector(); hideMainPanel(); hideFloatingBall()
         instance = null
         super.onDestroy()
     }
