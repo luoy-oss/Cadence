@@ -176,6 +176,9 @@ class GameOverlayView(
         // 命中区（始终显示）
         drawHitZones(canvas)
 
+        // 目标间连线
+        drawChainLinks(canvas, gameTimeMs)
+
         // O→o 缩圈：显示接下来 3 个待按琴键
         drawUpcomingRings(canvas, gameTimeMs)
 
@@ -290,6 +293,45 @@ class GameOverlayView(
                         this.color = Color.argb(dotAlpha, r, g, b)
                     }
                     canvas.drawCircle(cx, cy, 5f + progress * 3f, centerDot)
+                }
+            }
+        }
+    }
+
+    /** 目标间连线（1→2→3 渐变虚线，支持单音/多音） */
+    private fun drawChainLinks(canvas: Canvas, gameTimeMs: Long) {
+        val posList = mutableListOf<List<Pair<Float, Float>>>()
+        val progList = mutableListOf<Float>()
+        val colList = mutableListOf<Int>()
+
+        for (g in timeGroups) {
+            if (posList.size >= 3) break
+            if (!g.hit && g.timeMs > gameTimeMs - 100) {
+                val t = g.timeMs - gameTimeMs
+                if (t > APPROACH_TIME_MS) continue
+                val progress = (1.0 - t.toDouble() / APPROACH_TIME_MS).coerceIn(0.0, 1.0).toFloat()
+                val rank = posList.size + 1
+                val color = when (rank) { 1 -> ringColor1; 2 -> ringColor2; else -> ringColor3 }
+                posList.add(g.notes.map { sx(baseX + it.col * colSpacing) to sy(baseY + it.row * rowSpacing) })
+                progList.add(progress); colList.add(color)
+            }
+        }
+        if (posList.size < 2) return
+
+        for (i in 0 until posList.size - 1) {
+            val alpha = ((progList[i] + progList[i + 1]) / 2 * 100).toInt().coerceIn(0, 200)
+            if (alpha < 10) continue
+            val c1 = Color.argb(alpha, Color.red(colList[i]), Color.green(colList[i]), Color.blue(colList[i]))
+            val c2 = Color.argb(alpha, Color.red(colList[i + 1]), Color.green(colList[i + 1]), Color.blue(colList[i + 1]))
+
+            for ((x1, y1) in posList[i]) {
+                for ((x2, y2) in posList[i + 1]) {
+                    val lp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        style = Paint.Style.STROKE; strokeWidth = 2.5f; strokeCap = Paint.Cap.ROUND
+                        pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
+                        shader = LinearGradient(x1, y1, x2, y2, c1, c2, Shader.TileMode.CLAMP)
+                    }
+                    canvas.drawLine(x1, y1, x2, y2, lp)
                 }
             }
         }

@@ -46,6 +46,7 @@ class FloatingWindowService : Service() {
     private var scoreSelectorPanel: View? = null
     private var calibrationView: CalibrationOverlayView? = null
     private var gameOverlay: GameOverlayView? = null
+    private var sizePreviewView: View? = null
 
     private var isBallShowing = false
     private var isMainPanelShowing = false
@@ -259,32 +260,42 @@ class FloatingWindowService : Service() {
         contentLayout.addView(createDivider())
 
         // 圆圈大小
+        val effectiveCircle = if (circleSize > 0) circleSize else (minOf(colSpacing, rowSpacing) * 0.3f).coerceIn(24f, 80f)
         val circleLabel = TextView(this).apply {
-            text = "圆圈大小: ${circleSize.toInt()}"; setTextColor(Color.WHITE); textSize = 13f
+            text = "圆圈大小: ${effectiveCircle.toInt()}${if (circleSize <= 0) " (自动)" else ""}"
+            setTextColor(Color.WHITE); textSize = 13f
         }
         contentLayout.addView(circleLabel)
         contentLayout.addView(SeekBar(this).apply {
-            max = 100; progress = (circleSize.coerceIn(20f, 120f) - 20).toInt()
+            max = 100; progress = (effectiveCircle.coerceIn(20f, 120f) - 20).toInt()
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { circleSize = (20 + p).toFloat(); circleLabel.text = "圆圈大小: ${circleSize.toInt()}" }
-                override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) {}
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                    circleSize = (20 + p).toFloat(); circleLabel.text = "圆圈大小: ${circleSize.toInt()}"
+                    sizePreviewView?.invalidate()
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) { showSizePreview() }
+                override fun onStopTrackingTouch(sb: SeekBar?) { hideSizePreview() }
             })
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dpToPx(4); bottomMargin = dpToPx(4)
         })
 
         // 编号字号
+        val effectiveNumber = if (numberSize > 0) numberSize else (effectiveCircle * 0.6f).coerceIn(14f, 36f)
         val fontLabel = TextView(this).apply {
-            text = "编号字号: ${numberSize.toInt()}"; setTextColor(Color.WHITE); textSize = 13f
+            text = "编号字号: ${effectiveNumber.toInt()}${if (numberSize <= 0) " (自动)" else ""}"
+            setTextColor(Color.WHITE); textSize = 13f
         }
         contentLayout.addView(fontLabel)
         contentLayout.addView(SeekBar(this).apply {
-            max = 34; progress = (numberSize.coerceIn(14f, 48f) - 14).toInt()
+            max = 34; progress = (effectiveNumber.coerceIn(14f, 48f) - 14).toInt()
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { numberSize = (14 + p).toFloat(); fontLabel.text = "编号字号: ${numberSize.toInt()}" }
-                override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) {}
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                    numberSize = (14 + p).toFloat(); fontLabel.text = "编号字号: ${numberSize.toInt()}"
+                    sizePreviewView?.invalidate()
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) { showSizePreview() }
+                override fun onStopTrackingTouch(sb: SeekBar?) { hideSizePreview() }
             })
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dpToPx(4); bottomMargin = dpToPx(4)
@@ -350,6 +361,7 @@ class FloatingWindowService : Service() {
     }
 
     private fun hideMainPanel() {
+        hideSizePreview()
         try { mainPanel?.let { windowManager?.removeView(it) } } catch (_: Exception) {}
         mainPanel = null; isMainPanelShowing = false
     }
@@ -641,6 +653,49 @@ class FloatingWindowService : Service() {
         baseX = bx; baseY = by; colSpacing = cs; rowSpacing = rs
     }
 
+    // ========== 大小预览 ==========
+
+    private fun showSizePreview() {
+        if (sizePreviewView != null) { sizePreviewView?.invalidate(); return }
+        val preview = object : View(this) {
+            override fun onDraw(c: Canvas) {
+                super.onDraw(c)
+                val autoC = if (circleSize > 0) circleSize else (minOf(colSpacing, rowSpacing) * 0.3f).coerceIn(24f, 80f)
+                val autoN = if (numberSize > 0) numberSize else (autoC * 0.6f).coerceIn(14f, 36f)
+                val zoneP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE; strokeWidth = 2f; color = Color.argb(150, 255, 107, 107)
+                }
+                val ringP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE; strokeWidth = 3f; color = Color.argb(120, 255, 107, 107)
+                }
+                val numP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.argb(200, 255, 255, 255); textSize = autoN; textAlign = Paint.Align.CENTER
+                    typeface = Typeface.DEFAULT_BOLD; setShadowLayer(4f, 0f, 0f, Color.argb(150, 0, 0, 0))
+                }
+                for (row in 0..2) {
+                    for (col in 0..4) {
+                        val cx = baseX + col * colSpacing; val cy = baseY + row * rowSpacing
+                        c.drawCircle(cx, cy, autoC * 0.7f, zoneP)
+                        c.drawCircle(cx, cy, autoC * 2.5f, ringP)
+                        c.drawText("${col + 1}", cx, cy + autoN * 0.35f, numP)
+                    }
+                }
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSPARENT
+        )
+        try { windowManager?.addView(preview, params); sizePreviewView = preview } catch (e: Exception) { Log.e(TAG, "Error showing size preview", e) }
+    }
+
+    private fun hideSizePreview() {
+        try { sizePreviewView?.let { windowManager?.removeView(it) } } catch (_: Exception) {}
+        sizePreviewView = null
+    }
+
     // ========== 辅助方法 ==========
 
     private fun createDivider(): View {
@@ -681,7 +736,7 @@ class FloatingWindowService : Service() {
 
     override fun onDestroy() {
         isRunning = false
-        stopCalibrationMode(); hideStatusText(); hideCountdown(); stopGameOverlay(); hideScoreSelector(); hideMainPanel(); hideFloatingBall()
+        stopCalibrationMode(); hideSizePreview(); hideStatusText(); hideCountdown(); stopGameOverlay(); hideScoreSelector(); hideMainPanel(); hideFloatingBall()
         instance = null
         super.onDestroy()
     }
